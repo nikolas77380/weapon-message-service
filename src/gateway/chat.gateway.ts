@@ -12,6 +12,7 @@ import { UseGuards, Logger } from '@nestjs/common';
 import { MessagesService } from '../messages/messages.service';
 import { RedisService } from '../redis/redis.service';
 import { AuthService } from '../auth/auth.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   SendMessageDto,
   TypingDto,
@@ -44,6 +45,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private messagesService: MessagesService,
     private redisService: RedisService,
     private authService: AuthService,
+    private notificationsService: NotificationsService,
   ) {}
 
   async handleConnection(client: AuthenticatedSocket) {
@@ -209,6 +211,19 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
             chatId: data.chatId,
             unreadCount: recipientUnreadCount,
           });
+        });
+      }
+
+      // Если получатель офлайн, отправляем email через marketplace-api/Strapi
+      const isRecipientOnline = await this.redisService.isUserOnline(recipientId);
+      if (!isRecipientOnline && data.text && data.text.trim().length > 0) {
+        // Не ждем результата, но логируем внутри сервиса
+        this.notificationsService.sendOfflineChatEmail({
+          recipientId,
+          senderId: client.userId,
+          chatId: data.chatId,
+          messageText: data.text,
+          productId: data.productId,
         });
       }
 
