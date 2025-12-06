@@ -1,8 +1,10 @@
-import { Injectable, Inject, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Inject, OnModuleDestroy, Logger } from '@nestjs/common';
 import Redis from 'ioredis';
 
 @Injectable()
 export class RedisService implements OnModuleDestroy {
+  private readonly logger = new Logger(RedisService.name);
+
   constructor(@Inject('REDIS_CLIENT') private redis: Redis) {}
 
   getClient(): Redis {
@@ -25,7 +27,9 @@ export class RedisService implements OnModuleDestroy {
   async isUserOnline(userId: number): Promise<boolean> {
     const key = `user:${userId}:online`;
     const result = await this.redis.exists(key);
-    return result === 1;
+    const isOnline = result === 1;
+    this.logger.debug(`User ${userId} online status check: ${isOnline} (key: ${key})`);
+    return isOnline;
   }
 
   async getOnlineUsers(): Promise<number[]> {

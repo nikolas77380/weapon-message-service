@@ -216,7 +216,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       // Если получатель офлайн, отправляем email через marketplace-api/Strapi
       const isRecipientOnline = await this.redisService.isUserOnline(recipientId);
+      this.logger.log(
+        `Checking recipient ${recipientId} online status: ${isRecipientOnline}, message text length: ${data.text?.trim().length || 0}`,
+      );
+      
       if (!isRecipientOnline && data.text && data.text.trim().length > 0) {
+        this.logger.log(
+          `Recipient ${recipientId} is offline, attempting to send email notification`,
+        );
         // Не ждем результата, но логируем внутри сервиса
         this.notificationsService.sendOfflineChatEmail({
           recipientId,
@@ -224,7 +231,16 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
           chatId: data.chatId,
           messageText: data.text,
           productId: data.productId,
+        }).catch((error) => {
+          this.logger.error(
+            `Failed to send offline email notification: ${error.message}`,
+            error.stack,
+          );
         });
+      } else if (isRecipientOnline) {
+        this.logger.log(
+          `Recipient ${recipientId} is online, skipping email notification`,
+        );
       }
 
       return { success: true, message };

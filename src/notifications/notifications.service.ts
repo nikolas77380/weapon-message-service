@@ -24,8 +24,12 @@ export class NotificationsService {
     messageText: string;
     productId?: number;
   }): Promise<void> {
+    this.logger.log(
+      `Attempting to send offline chat email: recipient=${params.recipientId}, sender=${params.senderId}, chatId=${params.chatId}, apiUrl=${this.apiUrl}`,
+    );
+    
     try {
-      await axios.post(
+      const response = await axios.post(
         `${this.apiUrl}/api/chat-email/offline-message`,
         {
           recipientId: params.recipientId,
@@ -40,12 +44,15 @@ export class NotificationsService {
       );
 
       this.logger.log(
-        `Offline chat email requested for recipient ${params.recipientId} in chat ${params.chatId}`,
+        `Offline chat email requested successfully for recipient ${params.recipientId} in chat ${params.chatId}, response status: ${response.status}`,
       );
     } catch (error: any) {
       this.logger.error(
         `Failed to request offline chat email for recipient ${params.recipientId} in chat ${params.chatId}: ${error.message}`,
+        error.response?.data ? JSON.stringify(error.response.data) : '',
+        error.stack,
       );
+      throw error; // Пробрасываем ошибку дальше для обработки в gateway
     }
   }
 }
