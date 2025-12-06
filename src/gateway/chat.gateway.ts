@@ -91,6 +91,9 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       // Устанавливаем статус онлайн в Redis
       await this.redisService.setUserOnline(userInfo.id, client.id);
+      this.logger.log(
+        `User ${userInfo.id} set as online (socket: ${client.id})`,
+      );
 
       // Уведомляем других пользователей о том, что пользователь онлайн
       this.server.emit('user:online', { userId: userInfo.id });
@@ -114,9 +117,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   async handleDisconnect(client: AuthenticatedSocket) {
-    this.logger.log(`Client disconnecting: ${client.id}`);
+    this.logger.log(`[DISCONNECT] Client disconnecting: ${client.id}, userId: ${client.userId}`);
 
     if (!client.userId) {
+      this.logger.warn(`[DISCONNECT] Client ${client.id} disconnected without userId`);
       return;
     }
 
@@ -125,16 +129,28 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     if (userSocketSet) {
       userSocketSet.delete(client.id);
+      this.logger.log(
+        `[DISCONNECT] Removed socket ${client.id} from user ${userId}, remaining sockets: ${userSocketSet.size}`,
+      );
 
       // Если это был последний сокет пользователя, удаляем статус онлайн
       if (userSocketSet.size === 0) {
         this.userSockets.delete(userId);
         await this.redisService.removeUserOnline(userId);
+        this.logger.log(`[DISCONNECT] User ${userId} marked as offline (last socket disconnected)`);
         this.server.emit('user:offline', { userId });
+      } else {
+        this.logger.log(
+          `[DISCONNECT] User ${userId} still has ${userSocketSet.size} active socket(s), remains online`,
+        );
       }
+    } else {
+      this.logger.warn(
+        `[DISCONNECT] User ${userId} disconnected but was not found in userSockets map`,
+      );
     }
 
-    this.logger.log(`User ${userId} disconnected`);
+    this.logger.log(`[DISCONNECT] Disconnect handling completed for user ${userId}`);
   }
 
   @SubscribeMessage('message:send')
@@ -142,8 +158,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() data: SendMessageDto,
     @ConnectedSocket() client: AuthenticatedSocket,
   ) {
+    this.logger.log(
+      `[MESSAGE:SEND] Received message send request: chatId=${data.chatId}, sender=${client.userId}, textLength=${data.text?.length || 0}`,
+    );
+
     // Проверяем только наличие userId в сокете (быстрая проверка)
     if (!client.userId || !client.token) {
+      this.logger.warn(
+        `[MESSAGE:SEND] Unauthorized: missing userId or token`,
+      );
       client.emit('auth:error', {
         error: 'Authentication required',
         code: 'TOKEN_REQUIRED',
@@ -165,16 +188,24 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // Проверяем, что пользователь является участником чата
       const chat = await this.messagesService.getChatById(data.chatId);
       if (!chat) {
+        this.logger.warn(`[MESSAGE:SEND] Chat not found: ${data.chatId}`);
         return { error: 'Chat not found' };
       }
 
       if (chat.buyer_id !== client.userId && chat.seller_id !== client.userId) {
+        this.logger.warn(
+          `[MESSAGE:SEND] Access denied: user ${client.userId} is not a participant of chat ${data.chatId}`,
+        );
         return { error: 'Access denied' };
       }
 
       // Определяем получателя (другого участника чата)
       const recipientId =
         chat.buyer_id === client.userId ? chat.seller_id : chat.buyer_id;
+      
+      this.logger.log(
+        `[MESSAGE:SEND] Processing message: sender=${client.userId}, recipient=${recipientId}, chatId=${data.chatId}`,
+      );
 
       // Создаем сообщение
       const message = await this.messagesService.createMessage(
@@ -216,13 +247,21 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       // Если получатель офлайн, отправляем email через marketplace-api/Strapi
       const isRecipientOnline = await this.redisService.isUserOnline(recipientId);
+      const messageTextLength = data.text?.trim().length || 0;
+      
       this.logger.log(
-        `Checking recipient ${recipientId} online status: ${isRecipientOnline}, message text length: ${data.text?.trim().length || 0}`,
+        `[EMAIL-CHECK] Recipient ${recipientId} online status: ${isRecipientOnline}, message text length: ${messageTextLength}`,
+      );
+      console.log(
+        `[EMAIL-CHECK] Recipient ${recipientId} online status: ${isRecipientOnline}, message text length: ${messageTextLength}`,
       );
       
       if (!isRecipientOnline && data.text && data.text.trim().length > 0) {
         this.logger.log(
-          `Recipient ${recipientId} is offline, attempting to send email notification`,
+          `[EMAIL-SEND] Recipient ${recipientId} is OFFLINE, attempting to send email notification`,
+        );
+        console.log(
+          `[EMAIL-SEND] Recipient ${recipientId} is OFFLINE, attempting to send email notification`,
         );
         // Не ждем результата, но логируем внутри сервиса
         this.notificationsService.sendOfflineChatEmail({
@@ -233,13 +272,27 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
           productId: data.productId,
         }).catch((error) => {
           this.logger.error(
-            `Failed to send offline email notification: ${error.message}`,
+            `[EMAIL-ERROR] Failed to send offline email notification: ${error.message}`,
             error.stack,
+          );
+          console.error(
+            `[EMAIL-ERROR] Failed to send offline email notification: ${error.message}`,
+            error,
           );
         });
       } else if (isRecipientOnline) {
         this.logger.log(
-          `Recipient ${recipientId} is online, skipping email notification`,
+          `[EMAIL-SKIP] Recipient ${recipientId} is ONLINE, skipping email notification`,
+        );
+        console.log(
+          `[EMAIL-SKIP] Recipient ${recipientId} is ONLINE, skipping email notification`,
+        );
+      } else {
+        this.logger.log(
+          `[EMAIL-SKIP] Skipping email: isRecipientOnline=${isRecipientOnline}, hasText=${!!data.text}, textLength=${messageTextLength}`,
+        );
+        console.log(
+          `[EMAIL-SKIP] Skipping email: isRecipientOnline=${isRecipientOnline}, hasText=${!!data.text}, textLength=${messageTextLength}`,
         );
       }
 

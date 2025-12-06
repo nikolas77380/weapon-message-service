@@ -25,7 +25,10 @@ export class NotificationsService {
     productId?: number;
   }): Promise<void> {
     this.logger.log(
-      `Attempting to send offline chat email: recipient=${params.recipientId}, sender=${params.senderId}, chatId=${params.chatId}, apiUrl=${this.apiUrl}`,
+      `[NOTIFICATIONS] Attempting to send offline chat email: recipient=${params.recipientId}, sender=${params.senderId}, chatId=${params.chatId}, apiUrl=${this.apiUrl}`,
+    );
+    console.log(
+      `[NOTIFICATIONS] Attempting to send offline chat email: recipient=${params.recipientId}, sender=${params.senderId}, chatId=${params.chatId}, apiUrl=${this.apiUrl}`,
     );
     
     try {
@@ -44,13 +47,26 @@ export class NotificationsService {
       );
 
       this.logger.log(
-        `Offline chat email requested successfully for recipient ${params.recipientId} in chat ${params.chatId}, response status: ${response.status}`,
+        `[NOTIFICATIONS] Offline chat email requested successfully for recipient ${params.recipientId} in chat ${params.chatId}, response status: ${response.status}`,
+      );
+      console.log(
+        `[NOTIFICATIONS] ✅ Offline chat email requested successfully for recipient ${params.recipientId} in chat ${params.chatId}, response status: ${response.status}`,
       );
     } catch (error: any) {
       this.logger.error(
-        `Failed to request offline chat email for recipient ${params.recipientId} in chat ${params.chatId}: ${error.message}`,
+        `[NOTIFICATIONS] ❌ Failed to request offline chat email for recipient ${params.recipientId} in chat ${params.chatId}: ${error.message}`,
         error.response?.data ? JSON.stringify(error.response.data) : '',
         error.stack,
+      );
+      console.error(
+        `[NOTIFICATIONS] ❌ Failed to request offline chat email:`,
+        {
+          recipientId: params.recipientId,
+          chatId: params.chatId,
+          error: error.message,
+          response: error.response?.data,
+          status: error.response?.status,
+        },
       );
       throw error; // Пробрасываем ошибку дальше для обработки в gateway
     }

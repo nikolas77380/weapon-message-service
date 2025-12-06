@@ -16,12 +16,14 @@ export class RedisService implements OnModuleDestroy {
     const key = `user:${userId}:online`;
     await this.redis.setex(key, 300, socketId); // 5 минут TTL
     await this.redis.sadd('online:users', userId.toString());
+    this.logger.debug(`Set user ${userId} as online in Redis (key: ${key}, TTL: 300s)`);
   }
 
   async removeUserOnline(userId: number): Promise<void> {
     const key = `user:${userId}:online`;
     await this.redis.del(key);
     await this.redis.srem('online:users', userId.toString());
+    this.logger.debug(`Removed user ${userId} online status from Redis (key: ${key})`);
   }
 
   async isUserOnline(userId: number): Promise<boolean> {

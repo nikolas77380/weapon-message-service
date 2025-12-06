@@ -97,7 +97,7 @@ export class AuthService {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        timeout: 5000, // 5 секунд таймаут
+        timeout: 10000, // 10 секунд таймаут (увеличено для медленных соединений)
       });
 
       if (response.data && response.data.id) {
@@ -119,8 +119,30 @@ export class AuthService {
     } catch (error) {
       if (error instanceof AxiosError) {
         const status = error.response?.status;
-        const statusText = error.response?.statusText;
+        const statusText = error.response?.statusText || 'Unknown';
+        const errorCode = error.code;
         
+        // Проверяем ошибки сети (нет response)
+        // ECONNABORTED - таймаут запроса
+        // ECONNREFUSED - соединение отклонено
+        // ETIMEDOUT - таймаут соединения
+        // ENOTFOUND - хост не найден
+        if (errorCode === 'ECONNREFUSED' || errorCode === 'ETIMEDOUT' || errorCode === 'ENOTFOUND' || errorCode === 'ECONNABORTED') {
+          this.logger.warn(`Cannot connect to marketplace-api at ${this.apiUrl}: ${errorCode}${errorCode === 'ECONNABORTED' ? ' (timeout)' : ''}`);
+          // Если API недоступен, но токен валиден локально, разрешаем доступ
+          // (fallback для высокой доступности)
+          if (localUserId) {
+            this.logger.warn(`API unavailable (${errorCode}), using local token validation for user ${localUserId}`);
+            return {
+              id: localUserId,
+              email: '',
+              username: '',
+            };
+          }
+          throw new UnauthorizedException('Authentication service unavailable');
+        }
+        
+        // Проверяем HTTP статусы
         if (status === 401) {
           // Токен истек или невалиден
           this.logger.debug(`Token verification failed: 401 Unauthorized`);
@@ -147,28 +169,24 @@ export class AuthService {
           // Если токен невалиден локально, возвращаем null
           return null;
         }
-        if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
-          this.logger.error(`Cannot connect to marketplace-api at ${this.apiUrl}`);
-          // Если API недоступен, но токен валиден локально, разрешаем доступ
-          // (fallback для высокой доступности)
-          if (localUserId) {
-            this.logger.warn(`API unavailable, using local token validation for user ${localUserId}`);
-            return {
-              id: localUserId,
-              email: '',
-              username: '',
-            };
-          }
-          throw new UnauthorizedException('Authentication service unavailable');
-        }
         
         // Другие ошибки HTTP
-        this.logger.error(
-          `Unexpected error verifying token: ${status} ${statusText}`,
-          error.response?.data
-        );
-      } else {
+        if (status) {
+          this.logger.error(
+            `Unexpected HTTP error verifying token: ${status} ${statusText}`,
+            error.response?.data
+          );
+        } else {
+          // AxiosError без response (сетевая ошибка)
+          this.logger.error(
+            `Network error verifying token: ${errorCode || 'Unknown'} - ${error.message}`,
+            error.stack
+          );
+        }
+      } else if (error instanceof Error) {
         this.logger.error(`Error verifying token: ${error.message}`, error.stack);
+      } else {
+        this.logger.error(`Unknown error verifying token:`, error);
       }
 
       // В случае любой другой ошибки, если токен валиден локально, используем fallback
